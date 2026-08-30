@@ -14,8 +14,10 @@ GRAPH_API_VERSION = "v20.0"
 
 
 def send_text(to: str, body: str) -> None:
-    token = os.getenv("WHATSAPP_ACCESS_TOKEN")
-    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    # .strip() por si el valor se pegó en el panel de variables con saltos
+    # de línea o espacios de sobra (causa típica de errores de cabecera HTTP).
+    token = (os.getenv("WHATSAPP_ACCESS_TOKEN") or "").strip() or None
+    phone_id = (os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "").strip() or None
 
     if not token or not phone_id:
         print(f"\n[WHATSAPP-SIMULADO -> {to}]\n{body}\n")

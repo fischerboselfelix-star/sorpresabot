@@ -19,10 +19,16 @@ WhatsApp.
 import os
 
 
+def _limpia(valor: str | None) -> str:
+    """Quita espacios y saltos de línea accidentales (típico al copiar/pegar
+    una clave en el panel de variables de Railway u otros paneles)."""
+    return (valor or "").strip()
+
+
 def _modo_activo() -> str:
-    if os.getenv("ANTHROPIC_API_KEY"):
+    if _limpia(os.getenv("ANTHROPIC_API_KEY")):
         return "anthropic"
-    if os.getenv("GEMINI_API_KEY"):
+    if _limpia(os.getenv("GEMINI_API_KEY")):
         return "gemini"
     return "mock"
 
@@ -49,18 +55,25 @@ def generar_contenido(system_prompt: str, instrucciones_formato: str, detalles: 
 
     modo = _modo_activo()
 
-    if modo == "anthropic":
-        return _generar_anthropic(system_prompt, prompt_usuario)
-    if modo == "gemini":
-        return _generar_gemini(system_prompt, prompt_usuario)
+    try:
+        if modo == "anthropic":
+            return _generar_anthropic(system_prompt, prompt_usuario)
+        if modo == "gemini":
+            return _generar_gemini(system_prompt, prompt_usuario)
+    except Exception as e:
+        # Red de seguridad: si la API de IA falla (clave mal copiada, límite
+        # de uso, corte de red...), el bot no debe quedarse mudo — cae al
+        # contenido de plantilla y deja rastro del error en los logs.
+        print(f"[LLM-ERROR] Fallo generando con {modo}: {e!r}. Usando modo mock.")
+
     return _generar_mock(system_prompt, detalles, instrucciones_formato)
 
 
 def _generar_anthropic(system_prompt: str, prompt_usuario: str) -> str:
     import anthropic
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    modelo = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+    client = anthropic.Anthropic(api_key=_limpia(os.environ["ANTHROPIC_API_KEY"]))
+    modelo = _limpia(os.getenv("ANTHROPIC_MODEL")) or "claude-sonnet-4-5"
     resp = client.messages.create(
         model=modelo,
         max_tokens=500,
@@ -73,8 +86,8 @@ def _generar_anthropic(system_prompt: str, prompt_usuario: str) -> str:
 def _generar_gemini(system_prompt: str, prompt_usuario: str) -> str:
     import google.generativeai as genai
 
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    modelo_nombre = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    genai.configure(api_key=_limpia(os.environ["GEMINI_API_KEY"]))
+    modelo_nombre = _limpia(os.getenv("GEMINI_MODEL")) or "gemini-2.0-flash"
     modelo = genai.GenerativeModel(modelo_nombre, system_instruction=system_prompt)
     resp = modelo.generate_content(prompt_usuario)
     return resp.text.strip()
