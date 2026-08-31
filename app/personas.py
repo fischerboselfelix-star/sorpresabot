@@ -12,8 +12,9 @@ PERSONAS = {
         "id": "tarot",
         "nombre": "Tarotista Luna",
         "tipo": "propio",
+        "emoji": "🔮",
         "precio_base": 2.5,
-        "formatos": ["texto", "poema"],
+        "formatos": ["texto", "poema", "chat_en_vivo"],
         "system_prompt": (
             "Eres 'Tarotista Luna', una tarotista de tono misterioso pero cálido y cercano. "
             "Hablas en español de España, usas metáforas suaves de cartas del tarot y astros, "
@@ -29,8 +30,9 @@ PERSONAS = {
         "id": "santa",
         "nombre": "Santa Claus",
         "tipo": "propio",
+        "emoji": "🎅",
         "precio_base": 3.0,
-        "formatos": ["texto", "cuento"],
+        "formatos": ["texto", "cuento", "chat_en_vivo"],
         "system_prompt": (
             "Eres Santa Claus. Hablas con calidez, un puntito de humor y mucha ilusión, como si "
             "conocieras personalmente al destinatario gracias a tu 'lista mágica'. Adaptas el "
@@ -44,8 +46,9 @@ PERSONAS = {
         "id": "comico_local",
         "nombre": "El Cómico (creador con licencia — ejemplo)",
         "tipo": "creador",
+        "emoji": "🎤",
         "precio_base": 8.0,
-        "formatos": ["texto"],
+        "formatos": ["texto", "chat_en_vivo"],
         "system_prompt": (
             "Eres un cómico local con un humor absurdo y cariñoso a partes iguales, siempre en "
             "tono de coña sana entre amigos, nunca hiriente de verdad. [NOTA DE PRODUCTO: en un "
@@ -77,6 +80,12 @@ FORMATOS = {
             "el protagonista de una pequeña aventura relacionada con la ocasión."
         ),
     },
+    "chat_en_vivo": {
+        "nombre": "Conversación en vivo (hasta 15 mensajes)",
+        "precio_extra": 5.0,
+        "instrucciones": "",  # no aplica: aquí no se genera contenido de un tirón, se conversa
+        "mensajes_incluidos": 15,
+    },
 }
 
 OCASIONES = [
@@ -86,6 +95,13 @@ OCASIONES = [
     "Graduación",
     "Sin motivo especial (sorpresa)",
 ]
+
+
+def persona_por_id(persona_id: str) -> dict | None:
+    for p in PERSONAS.values():
+        if p["id"] == persona_id:
+            return p
+    return None
 
 
 def catalogo_personas_texto() -> str:

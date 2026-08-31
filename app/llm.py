@@ -93,6 +93,96 @@ def _generar_gemini(system_prompt: str, prompt_usuario: str) -> str:
     return resp.text.strip()
 
 
+def generar_saludo_chat_vivo(system_prompt: str, detalles: dict) -> str:
+    """
+    Primer mensaje del personaje cuando el DESTINATARIO le escribe por
+    primera vez (chat en vivo, Opción B). A diferencia de generar_contenido,
+    esto abre una conversación, no cierra un encargo.
+    """
+    prompt_usuario = (
+        f"Te acaba de escribir por primera vez {detalles.get('destinatario')}. "
+        f"Preséntate en el papel de tu personaje y dirígete a él/ella por su nombre. "
+        f"El motivo es: {detalles.get('ocasion')}. "
+        + (
+            f"Detalle o anécdota a tener en cuenta si encaja de forma natural: "
+            f"«{detalles.get('anecdota')}». "
+            if detalles.get("anecdota")
+            else ""
+        )
+        + "Sé breve (2 a 4 líneas), cercano/a, y termina con algo que invite a seguir "
+        "charlando. No digas que eres una inteligencia artificial ni menciones que "
+        "alguien ha pagado por esto — para ti esta conversación es real."
+    )
+
+    modo = _modo_activo()
+    try:
+        if modo == "anthropic":
+            return _generar_anthropic(system_prompt, prompt_usuario)
+        if modo == "gemini":
+            return _generar_gemini(system_prompt, prompt_usuario)
+    except Exception as e:
+        print(f"[LLM-ERROR] Fallo generando saludo de chat en vivo con {modo}: {e!r}. Usando modo mock.")
+
+    destinatario = detalles.get("destinatario") or "amigo/a"
+    return (
+        f"[MOCK — sin API de IA configurada] ¡Hola, {destinatario}! Soy tu personaje "
+        "especial, listo para charlar contigo 😊 (configura ANTHROPIC_API_KEY o "
+        "GEMINI_API_KEY para que esto lo escriba de verdad la IA)."
+    )
+
+
+def generar_respuesta_chat_vivo(system_prompt: str, historial: list[dict], mensaje_nuevo: str) -> str:
+    """
+    Continúa una conversación ya empezada. `historial` es una lista de
+    {"role": "user"|"assistant", "texto": str} en orden cronológico, sin
+    incluir todavía `mensaje_nuevo`.
+    """
+    modo = _modo_activo()
+    try:
+        if modo == "anthropic":
+            return _continuar_anthropic(system_prompt, historial, mensaje_nuevo)
+        if modo == "gemini":
+            return _continuar_gemini(system_prompt, historial, mensaje_nuevo)
+    except Exception as e:
+        print(f"[LLM-ERROR] Fallo continuando chat en vivo con {modo}: {e!r}. Usando modo mock.")
+
+    return (
+        "[MOCK — sin API de IA configurada] (Aquí tu personaje seguiría la conversación "
+        "de verdad — configura ANTHROPIC_API_KEY o GEMINI_API_KEY para probarlo.)"
+    )
+
+
+def _continuar_anthropic(system_prompt: str, historial: list[dict], mensaje_nuevo: str) -> str:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=_limpia(os.environ["ANTHROPIC_API_KEY"]))
+    modelo = _limpia(os.getenv("ANTHROPIC_MODEL")) or "claude-sonnet-4-5"
+    mensajes = [{"role": h["role"], "content": h["texto"]} for h in historial]
+    mensajes.append({"role": "user", "content": mensaje_nuevo})
+    resp = client.messages.create(
+        model=modelo,
+        max_tokens=400,
+        system=system_prompt,
+        messages=mensajes,
+    )
+    return "".join(block.text for block in resp.content if block.type == "text").strip()
+
+
+def _continuar_gemini(system_prompt: str, historial: list[dict], mensaje_nuevo: str) -> str:
+    import google.generativeai as genai
+
+    genai.configure(api_key=_limpia(os.environ["GEMINI_API_KEY"]))
+    modelo_nombre = _limpia(os.getenv("GEMINI_MODEL")) or "gemini-2.0-flash"
+    modelo = genai.GenerativeModel(modelo_nombre, system_instruction=system_prompt)
+    historial_gemini = [
+        {"role": ("model" if h["role"] == "assistant" else "user"), "parts": [h["texto"]]}
+        for h in historial
+    ]
+    chat = modelo.start_chat(history=historial_gemini)
+    resp = chat.send_message(mensaje_nuevo)
+    return resp.text.strip()
+
+
 def _generar_mock(system_prompt: str, detalles: dict, instrucciones_formato: str) -> str:
     """
     Respuesta de plantilla, sin llamar a ninguna API, para poder probar todo

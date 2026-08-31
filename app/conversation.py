@@ -17,6 +17,7 @@ webhook real de WhatsApp (app/main.py) como el simulador local
 misma lógica que correría en producción.
 """
 
+import os
 from datetime import datetime, timedelta
 
 from . import storage
@@ -83,6 +84,12 @@ def handle_message(user_id: str, texto: str) -> list[str]:
 
     if estado == "ESPERANDO_DETALLES":
         sesion["anecdota"] = "" if texto.lower() == "ninguno" else texto
+
+        if sesion["formato_id"] == "chat_en_vivo":
+            # No hay nada que previsualizar ni programar: es una conversación
+            # en vivo, así que se entrega el link directamente.
+            return _entregar_chat_en_vivo(user_id, sesion)
+
         sesion["estado"] = "ESPERANDO_FECHA"
         return [
             "¿Cuándo quieres tenerlo listo? Escribe 'ahora' para generarlo ya, o una fecha y "
@@ -176,3 +183,39 @@ def _entregar(user_id: str, sesion: dict) -> list[str]:
     mensajes.append("Si quieres crear otro, escribe 'hola' cuando quieras 🙂")
     storage.reset_session(user_id)
     return mensajes
+
+
+def _entregar_chat_en_vivo(user_id: str, sesion: dict) -> list[str]:
+    persona = _persona_actual(sesion)
+    formato = FORMATOS[sesion["formato_id"]]
+    mensajes_incluidos = formato.get("mensajes_incluidos", 15)
+
+    codigo = storage.crear_encargo_chat_vivo(
+        persona_id=persona["id"],
+        destinatario=sesion["destinatario"],
+        ocasion=sesion["ocasion"],
+        anecdota=sesion.get("anecdota", ""),
+        comprador_user_id=user_id,
+        mensajes_incluidos=mensajes_incluidos,
+    )
+    link = _link_regalo(codigo)
+    precio = persona["precio_base"] + formato["precio_extra"]
+
+    mensajes = [
+        f"¡Listo! 🎉 Precio de esta experiencia: {precio:.2f} €.",
+        f"Mándale este link a {sesion['destinatario']} (por SMS, WhatsApp, donde prefieras):\n{link}",
+        f"Cuando lo abra y le escriba a {persona['nombre']}, tendrá una conversación en vivo "
+        f"de hasta {mensajes_incluidos} mensajes con él/ella — no es un texto para reenviar, "
+        "es él/ella hablando de verdad con el personaje.",
+        "Si quieres crear otro, escribe 'hola' cuando quieras 🙂",
+    ]
+    storage.reset_session(user_id)
+    return mensajes
+
+
+def _link_regalo(codigo: str) -> str:
+    base = os.getenv("PUBLIC_BASE_URL")
+    if not base:
+        dominio = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        base = f"https://{dominio}" if dominio else "http://localhost:8000"
+    return f"{base.rstrip('/')}/r/{codigo}"
