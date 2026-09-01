@@ -23,6 +23,11 @@ ENTREGAS_PROGRAMADAS: list["EntregaProgramada"] = []
 ENCARGOS: dict[str, "EncargoChatVivo"] = {}
 SESIONES_CHAT_VIVO: dict[str, str] = {}  # teléfono destinatario -> código
 
+# --- Búsqueda del tesoro ("pistas"): mismo patrón que el chat en vivo, pero
+# con una secuencia de pistas pre-generada que se va desvelando.
+ENCARGOS_PISTAS: dict[str, "EncargoPistas"] = {}
+SESIONES_PISTAS: dict[str, str] = {}  # teléfono destinatario -> código
+
 _CODIGO_RE = re.compile(r"[A-Z0-9]{6}")
 
 
@@ -49,6 +54,23 @@ class EncargoChatVivo:
     creado_en: datetime = field(default_factory=datetime.now)
 
 
+@dataclass
+class EncargoPistas:
+    codigo: str
+    persona_id: str
+    destinatario: str
+    ocasion: str
+    tema: str
+    anecdota: str
+    comprador_user_id: str
+    pistas: list[str]
+    reacciones: list[str]
+    tesoro: str
+    indice_actual: int = 0
+    completado: bool = False
+    creado_en: datetime = field(default_factory=datetime.now)
+
+
 def get_session(user_id: str) -> dict:
     if user_id not in SESSIONS:
         SESSIONS[user_id] = {"estado": "INICIO"}
@@ -71,10 +93,12 @@ def entregas_pendientes(ahora: Optional[datetime] = None) -> list[EntregaProgram
 
 
 def _generar_codigo() -> str:
+    """Un único pool de códigos para chat en vivo y pistas: así nunca chocan
+    entre sí y la landing page puede buscar el código en cualquiera de los dos."""
     alfabeto = string.ascii_uppercase + string.digits
     while True:
         codigo = "".join(random.choices(alfabeto, k=6))
-        if codigo not in ENCARGOS:
+        if codigo not in ENCARGOS and codigo not in ENCARGOS_PISTAS:
             return codigo
 
 
@@ -137,3 +161,58 @@ def guardar_turno(codigo: str, role: str, texto: str) -> None:
     encargo = ENCARGOS.get(codigo)
     if encargo:
         encargo.historial.append({"role": role, "texto": texto})
+
+
+def crear_encargo_pistas(
+    persona_id: str,
+    destinatario: str,
+    ocasion: str,
+    tema: str,
+    anecdota: str,
+    comprador_user_id: str,
+    pistas: list[str],
+    reacciones: list[str],
+    tesoro: str,
+) -> str:
+    codigo = _generar_codigo()
+    ENCARGOS_PISTAS[codigo] = EncargoPistas(
+        codigo=codigo,
+        persona_id=persona_id,
+        destinatario=destinatario,
+        ocasion=ocasion,
+        tema=tema,
+        anecdota=anecdota,
+        comprador_user_id=comprador_user_id,
+        pistas=pistas,
+        reacciones=reacciones,
+        tesoro=tesoro,
+    )
+    return codigo
+
+
+def obtener_encargo_pistas(codigo: str) -> Optional[EncargoPistas]:
+    return ENCARGOS_PISTAS.get((codigo or "").strip().upper())
+
+
+def obtener_encargo_pistas_desde_texto(texto: str) -> Optional[EncargoPistas]:
+    texto_norm = (texto or "").upper()
+    directo = ENCARGOS_PISTAS.get(texto_norm.strip())
+    if directo:
+        return directo
+    for candidato in _CODIGO_RE.findall(texto_norm):
+        if candidato in ENCARGOS_PISTAS:
+            return ENCARGOS_PISTAS[candidato]
+    return None
+
+
+def sesion_pistas_activa_para(telefono: str) -> Optional[EncargoPistas]:
+    codigo = SESIONES_PISTAS.get(telefono)
+    return ENCARGOS_PISTAS.get(codigo) if codigo else None
+
+
+def vincular_sesion_pistas(telefono: str, codigo: str) -> None:
+    SESIONES_PISTAS[telefono] = codigo
+
+
+def desvincular_sesion_pistas(telefono: str) -> None:
+    SESIONES_PISTAS.pop(telefono, None)

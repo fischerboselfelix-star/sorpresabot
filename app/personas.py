@@ -14,7 +14,7 @@ PERSONAS = {
         "tipo": "propio",
         "emoji": "🔮",
         "precio_base": 2.5,
-        "formatos": ["texto", "poema", "chat_en_vivo"],
+        "formatos": ["texto", "poema", "chat_en_vivo", "pistas"],
         "system_prompt": (
             "Eres 'Tarotista Luna', una tarotista de tono misterioso pero cálido y cercano. "
             "Hablas en español de España, usas metáforas suaves de cartas del tarot y astros, "
@@ -32,7 +32,7 @@ PERSONAS = {
         "tipo": "propio",
         "emoji": "🎅",
         "precio_base": 3.0,
-        "formatos": ["texto", "cuento", "chat_en_vivo"],
+        "formatos": ["texto", "cuento", "chat_en_vivo", "pistas"],
         "system_prompt": (
             "Eres Santa Claus. Hablas con calidez, un puntito de humor y mucha ilusión, como si "
             "conocieras personalmente al destinatario gracias a tu 'lista mágica'. Adaptas el "
@@ -48,7 +48,7 @@ PERSONAS = {
         "tipo": "creador",
         "emoji": "🎤",
         "precio_base": 8.0,
-        "formatos": ["texto", "chat_en_vivo"],
+        "formatos": ["texto", "chat_en_vivo", "pistas"],
         "system_prompt": (
             "Eres un cómico local con un humor absurdo y cariñoso a partes iguales, siempre en "
             "tono de coña sana entre amigos, nunca hiriente de verdad. [NOTA DE PRODUCTO: en un "
@@ -85,6 +85,12 @@ FORMATOS = {
         "precio_extra": 5.0,
         "instrucciones": "",  # no aplica: aquí no se genera contenido de un tirón, se conversa
         "mensajes_incluidos": 15,
+    },
+    "pistas": {
+        "nombre": "Búsqueda del tesoro (5 pistas en cadena)",
+        "precio_extra": 12.0,
+        "instrucciones": "",  # no aplica: se genera con generar_busqueda_tesoro
+        "num_pistas": 5,
     },
 }
 

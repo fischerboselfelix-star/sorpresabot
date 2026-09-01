@@ -21,7 +21,7 @@ import os
 from datetime import datetime, timedelta
 
 from . import storage
-from .llm import generar_contenido
+from .llm import generar_busqueda_tesoro, generar_contenido
 from .personas import PERSONAS, FORMATOS, OCASIONES, catalogo_personas_texto, catalogo_formatos_texto, catalogo_ocasiones_texto
 
 COMANDOS_REINICIO = {"reiniciar", "cancelar", "empezar", "hola"}
@@ -89,6 +89,9 @@ def handle_message(user_id: str, texto: str) -> list[str]:
             # No hay nada que previsualizar ni programar: es una conversación
             # en vivo, así que se entrega el link directamente.
             return _entregar_chat_en_vivo(user_id, sesion)
+
+        if sesion["formato_id"] == "pistas":
+            return _entregar_pistas(user_id, sesion)
 
         sesion["estado"] = "ESPERANDO_FECHA"
         return [
@@ -207,6 +210,47 @@ def _entregar_chat_en_vivo(user_id: str, sesion: dict) -> list[str]:
         f"Cuando lo abra y le escriba a {persona['nombre']}, tendrá una conversación en vivo "
         f"de hasta {mensajes_incluidos} mensajes con él/ella — no es un texto para reenviar, "
         "es él/ella hablando de verdad con el personaje.",
+        "Si quieres crear otro, escribe 'hola' cuando quieras 🙂",
+    ]
+    storage.reset_session(user_id)
+    return mensajes
+
+
+def _entregar_pistas(user_id: str, sesion: dict) -> list[str]:
+    persona = _persona_actual(sesion)
+    formato = FORMATOS[sesion["formato_id"]]
+    num_pistas = formato.get("num_pistas", 5)
+
+    resultado = generar_busqueda_tesoro(
+        persona["system_prompt"],
+        {
+            "destinatario": sesion["destinatario"],
+            "ocasion": sesion["ocasion"],
+            "tema": sesion.get("anecdota", ""),
+            "anecdota": sesion.get("anecdota", ""),
+        },
+        num_pistas=num_pistas,
+    )
+
+    codigo = storage.crear_encargo_pistas(
+        persona_id=persona["id"],
+        destinatario=sesion["destinatario"],
+        ocasion=sesion["ocasion"],
+        tema=sesion.get("anecdota", ""),
+        anecdota=sesion.get("anecdota", ""),
+        comprador_user_id=user_id,
+        pistas=resultado["pistas"],
+        reacciones=resultado["reacciones"],
+        tesoro=resultado["tesoro"],
+    )
+    link = _link_regalo(codigo)
+    precio = persona["precio_base"] + formato["precio_extra"]
+
+    mensajes = [
+        f"¡Listo! 🎉 Precio de esta experiencia: {precio:.2f} €.",
+        f"Mándale este link a {sesion['destinatario']} (por SMS, WhatsApp, donde prefieras):\n{link}",
+        f"Cuando lo abra y le escriba a {persona['nombre']}, empezará una búsqueda del tesoro de "
+        f"{num_pistas} pistas encadenadas, con una sorpresa final al terminar.",
         "Si quieres crear otro, escribe 'hola' cuando quieras 🙂",
     ]
     storage.reset_session(user_id)

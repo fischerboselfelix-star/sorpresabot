@@ -17,6 +17,7 @@ WhatsApp.
 """
 
 import os
+import re
 
 
 def _limpia(valor: str | None) -> str:
@@ -181,6 +182,92 @@ def _continuar_gemini(system_prompt: str, historial: list[dict], mensaje_nuevo: 
     chat = modelo.start_chat(history=historial_gemini)
     resp = chat.send_message(mensaje_nuevo)
     return resp.text.strip()
+
+
+def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int = 5) -> dict:
+    """
+    Genera de un tirón toda una búsqueda del tesoro: num_pistas pistas
+    encadenadas, una reacción corta de transición entre cada dos pistas, y
+    un mensaje final ("tesoro") de cierre. Devuelve
+    {"pistas": [...], "reacciones": [...], "tesoro": "..."}.
+    """
+    tema = detalles.get("tema") or detalles.get("anecdota") or "sorpréndeme, tú eliges el hilo"
+    prompt_usuario = (
+        f"Vas a preparar una búsqueda del tesoro en forma de pistas encadenadas para "
+        f"{detalles.get('destinatario')}, por motivo de: {detalles.get('ocasion')}. "
+        f"Tema o contexto que te ha dado quien encarga esto: «{tema}». "
+        f"Escribe exactamente {num_pistas} pistas, cada una un acertijo o adivinanza corta "
+        "(2 a 4 líneas) en tu papel de personaje, encadenadas por el tema, con un poco más de "
+        "intriga cada vez. No hace falta que tengan una única solución objetiva: son para generar "
+        "diversión y curiosidad, no para resolverse con precisión matemática. Después escribe una "
+        f"reacción corta y entusiasta (1 línea) para cada transición entre pistas "
+        f"({num_pistas - 1} reacciones en total). Termina con un TESORO: un mensaje final especial, "
+        "cálido y memorable (4 a 8 líneas), como cierre de toda la experiencia, en tu papel de "
+        "personaje. Responde EXACTAMENTE en este formato, una línea por cada elemento, sin nada "
+        "más antes ni después:\n"
+        + "\n".join(f"PISTA {i + 1}: <texto>" for i in range(num_pistas))
+        + "\n"
+        + "\n".join(f"REACCION {i + 1}: <texto>" for i in range(num_pistas - 1))
+        + "\nTESORO: <texto>"
+    )
+
+    modo = _modo_activo()
+    texto = None
+    try:
+        if modo == "anthropic":
+            texto = _generar_anthropic(system_prompt, prompt_usuario)
+        elif modo == "gemini":
+            texto = _generar_gemini(system_prompt, prompt_usuario)
+    except Exception as e:
+        print(f"[LLM-ERROR] Fallo generando búsqueda del tesoro con {modo}: {e!r}. Usando modo mock.")
+
+    if texto:
+        parseado = _parsear_busqueda_tesoro(texto, num_pistas)
+        if parseado:
+            return parseado
+        print("[LLM-ERROR] No se pudo interpretar el formato de la búsqueda del tesoro generada. Usando modo mock.")
+
+    return _busqueda_tesoro_mock(detalles, num_pistas)
+
+
+def _parsear_busqueda_tesoro(texto: str, num_pistas: int) -> dict | None:
+    pistas = []
+    for i in range(1, num_pistas + 1):
+        m = re.search(rf"PISTA {i}:\s*(.+?)(?=\n(?:PISTA|REACCION|TESORO)|\Z)", texto, re.S)
+        if not m:
+            return None
+        pistas.append(m.group(1).strip())
+
+    reacciones = []
+    for i in range(1, num_pistas):
+        m = re.search(rf"REACCION {i}:\s*(.+?)(?=\n(?:PISTA|REACCION|TESORO)|\Z)", texto, re.S)
+        reacciones.append(m.group(1).strip() if m else "¡Muy bien! Sigamos, aquí tienes la siguiente pista:")
+
+    m = re.search(r"TESORO:\s*(.+)", texto, re.S)
+    if not m:
+        return None
+    tesoro = m.group(1).strip()
+
+    if not tesoro or any(not p for p in pistas):
+        return None
+
+    return {"pistas": pistas, "reacciones": reacciones, "tesoro": tesoro}
+
+
+def _busqueda_tesoro_mock(detalles: dict, num_pistas: int) -> dict:
+    destinatario = detalles.get("destinatario") or "amigo/a"
+    tema = detalles.get("tema") or detalles.get("anecdota") or "un recuerdo especial"
+    pistas = [
+        f"[MOCK — sin API de IA configurada] Pista {i + 1} para {destinatario}, sobre «{tema}»..."
+        for i in range(num_pistas)
+    ]
+    reacciones = ["[MOCK] ¡Muy bien! Sigamos..." for _ in range(max(num_pistas - 1, 0))]
+    tesoro = (
+        f"[MOCK — sin API de IA configurada] ¡Enhorabuena, {destinatario}! Has llegado al final "
+        "del tesoro. 🎉 (Configura ANTHROPIC_API_KEY o GEMINI_API_KEY para que esto lo escriba "
+        "de verdad la IA.)"
+    )
+    return {"pistas": pistas, "reacciones": reacciones, "tesoro": tesoro}
 
 
 def _generar_mock(system_prompt: str, detalles: dict, instrucciones_formato: str) -> str:
