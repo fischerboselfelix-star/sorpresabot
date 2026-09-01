@@ -225,31 +225,53 @@ def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int 
         parseado = _parsear_busqueda_tesoro(texto, num_pistas)
         if parseado:
             return parseado
-        print("[LLM-ERROR] No se pudo interpretar el formato de la búsqueda del tesoro generada. Usando modo mock.")
+        print(
+            "[LLM-ERROR] No se pudo interpretar el formato de la búsqueda del tesoro generada. "
+            f"Usando modo mock. Texto crudo recibido:\n{texto[:1500]}"
+        )
 
     return _busqueda_tesoro_mock(detalles, num_pistas)
 
 
 def _parsear_busqueda_tesoro(texto: str, num_pistas: int) -> dict | None:
-    pistas = []
-    for i in range(1, num_pistas + 1):
-        m = re.search(rf"PISTA {i}:\s*(.+?)(?=\n(?:PISTA|REACCION|TESORO)|\Z)", texto, re.S)
-        if not m:
-            return None
-        pistas.append(m.group(1).strip())
+    """
+    Tolerante a variaciones típicas del modelo: markdown alrededor de las
+    etiquetas (**PISTA 1:**), mayúsculas/minúsculas, "REACCIÓN" con tilde,
+    preámbulo antes de la primera etiqueta, orden ligeramente distinto...
+    Solo falla (devuelve None) si de verdad faltan piezas del contenido.
+    """
+    # Ancladas a principio de línea (tras markdown/espacios) para no confundir
+    # una mención de pasada a "el tesoro" en una frase con la etiqueta real.
+    inicio = r"(?:^|\n)[ \t]*[*_#]*[ \t]*"
+    etiqueta_pista = inicio + r"PISTA\s*(\d+)[.:]?[*_#\s]*"
+    etiqueta_reaccion = inicio + r"REACCI[OÓ]N\s*(\d+)[.:]?[*_#\s]*"
+    etiqueta_tesoro = inicio + r"TESORO[.:]?[*_#\s]*"
+    limite_interno = r"PISTA\s*\d+|REACCI[OÓ]N\s*\d+|TESORO"
+    limite = rf"(?={inicio}(?:{limite_interno})|\Z)"
 
-    reacciones = []
-    for i in range(1, num_pistas):
-        m = re.search(rf"REACCION {i}:\s*(.+?)(?=\n(?:PISTA|REACCION|TESORO)|\Z)", texto, re.S)
-        reacciones.append(m.group(1).strip() if m else "¡Muy bien! Sigamos, aquí tienes la siguiente pista:")
+    def _limpiar(s: str) -> str:
+        return s.strip(" \n\t*_-")
 
-    m = re.search(r"TESORO:\s*(.+)", texto, re.S)
-    if not m:
-        return None
-    tesoro = m.group(1).strip()
+    pistas_por_numero: dict[int, str] = {}
+    for m in re.finditer(rf"{etiqueta_pista}(.+?){limite}", texto, re.S | re.I):
+        pistas_por_numero[int(m.group(1))] = _limpiar(m.group(2))
 
+    reacciones_por_numero: dict[int, str] = {}
+    for m in re.finditer(rf"{etiqueta_reaccion}(.+?){limite}", texto, re.S | re.I):
+        reacciones_por_numero[int(m.group(1))] = _limpiar(m.group(2))
+
+    tesoro = ""
+    for m in re.finditer(rf"{etiqueta_tesoro}(.+?){limite}", texto, re.S | re.I):
+        tesoro = _limpiar(m.group(1))  # se queda con la última ocurrencia, por si acaso
+
+    pistas = [pistas_por_numero.get(i, "") for i in range(1, num_pistas + 1)]
     if not tesoro or any(not p for p in pistas):
         return None
+
+    reacciones = [
+        reacciones_por_numero.get(i) or "¡Muy bien! Sigamos, aquí tienes la siguiente pista:"
+        for i in range(1, num_pistas)
+    ]
 
     return {"pistas": pistas, "reacciones": reacciones, "tesoro": tesoro}
 
