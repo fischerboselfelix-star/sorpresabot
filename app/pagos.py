@@ -76,18 +76,25 @@ def iniciar_pago(pedido_id: str, descripcion: str, precio_eur: float, user_id: s
     return session.url
 
 
-def verificar_firma_webhook(payload: bytes, sig_header: str):
+def verificar_firma_webhook(payload: bytes, sig_header: str) -> dict:
     """
     Valida que el webhook viene de verdad de Stripe (comprobando la firma
-    con STRIPE_WEBHOOK_SECRET) y devuelve el evento ya verificado. Si no hay
-    STRIPE_WEBHOOK_SECRET configurado (por ejemplo, en pruebas locales antes
-    de tener el endpoint dado de alta en el panel de Stripe), se procesa el
-    JSON directamente sin verificar firma — NUNCA hacer esto en producción
-    con dinero real sin haber configurado el secreto del webhook.
+    con STRIPE_WEBHOOK_SECRET) y devuelve el evento ya verificado, SIEMPRE
+    como diccionario normal de Python (con .to_dict(), recursivo) — nunca
+    como el objeto propio de la librería de Stripe, que no admite .get()
+    en sus campos anidados (solo indexado con corchetes) y da un
+    AttributeError confuso si se intenta.
+
+    Si no hay STRIPE_WEBHOOK_SECRET configurado (por ejemplo, en pruebas
+    locales antes de tener el endpoint dado de alta en el panel de Stripe),
+    se procesa el JSON directamente sin verificar firma — NUNCA hacer esto
+    en producción con dinero real sin haber configurado el secreto del
+    webhook.
     """
     secreto = _limpia(os.getenv("STRIPE_WEBHOOK_SECRET"))
     if secreto:
         import stripe
 
-        return stripe.Webhook.construct_event(payload, sig_header, secreto)
+        evento = stripe.Webhook.construct_event(payload, sig_header, secreto)
+        return evento.to_dict()
     return json.loads(payload)
