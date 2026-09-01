@@ -187,10 +187,12 @@ def _continuar_gemini(system_prompt: str, historial: list[dict], mensaje_nuevo: 
 
 def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int = 5) -> dict:
     """
-    Genera de un tirón toda una búsqueda del tesoro: num_pistas pistas
-    encadenadas, una reacción corta de transición entre cada dos pistas, y
-    un mensaje final ("tesoro") de cierre. Devuelve
-    {"pistas": [...], "reacciones": [...], "tesoro": "..."}.
+    Genera de un tirón el esqueleto de una búsqueda del tesoro: num_pistas
+    pistas encadenadas y un mensaje final ("tesoro") de cierre. Las
+    reacciones a cada respuesta del destinatario NO se generan aquí — se
+    generan en vivo, una a una, con generar_reaccion_pista, para que
+    reaccionen a lo que la persona ha escrito de verdad en vez de ser un
+    "¡genial, siguiente!" genérico. Devuelve {"pistas": [...], "tesoro": "..."}.
     """
     tema = detalles.get("tema") or detalles.get("anecdota") or "sorpréndeme, tú eliges el hilo"
     prompt_usuario = (
@@ -200,28 +202,21 @@ def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int 
         f"Escribe exactamente {num_pistas} pistas, cada una un acertijo o adivinanza corta "
         "(2 a 4 líneas) en tu papel de personaje, encadenadas por el tema, con un poco más de "
         "intriga cada vez. No hace falta que tengan una única solución objetiva: son para generar "
-        "diversión y curiosidad, no para resolverse con precisión matemática. Después escribe una "
-        f"reacción corta y entusiasta (1 línea) para cada transición entre pistas "
-        f"({num_pistas - 1} reacciones en total). Termina con un TESORO: un mensaje final especial, "
-        "cálido y memorable (4 a 8 líneas), como cierre de toda la experiencia, en tu papel de "
-        "personaje. Responde EXACTAMENTE en este formato, una línea por cada elemento, sin nada "
-        "más antes ni después:\n"
+        "diversión y curiosidad, no para resolverse con precisión matemática. Termina con un "
+        "TESORO: un mensaje final especial, cálido y memorable (4 a 8 líneas), como cierre de "
+        "toda la experiencia, en tu papel de personaje. Responde EXACTAMENTE en este formato, "
+        "una línea por cada elemento, sin nada más antes ni después:\n"
         + "\n".join(f"PISTA {i + 1}: <texto>" for i in range(num_pistas))
-        + "\n"
-        + "\n".join(f"REACCION {i + 1}: <texto>" for i in range(num_pistas - 1))
         + "\nTESORO: <texto>"
     )
 
-    # 5 pistas + 4 reacciones + tesoro es bastante más largo que una entrega
-    # normal — con el límite por defecto (500) la respuesta se corta a mitad
-    # y el parser no encuentra el tesoro. Le damos mucho más margen.
     modo = _modo_activo()
     texto = None
     try:
         if modo == "anthropic":
-            texto = _generar_anthropic(system_prompt, prompt_usuario, max_tokens=2000)
+            texto = _generar_anthropic(system_prompt, prompt_usuario, max_tokens=1500)
         elif modo == "gemini":
-            texto = _generar_gemini(system_prompt, prompt_usuario, max_tokens=2000)
+            texto = _generar_gemini(system_prompt, prompt_usuario, max_tokens=1500)
     except Exception as e:
         print(f"[LLM-ERROR] Fallo generando búsqueda del tesoro con {modo}: {e!r}. Usando modo mock.")
 
@@ -240,17 +235,15 @@ def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int 
 def _parsear_busqueda_tesoro(texto: str, num_pistas: int) -> dict | None:
     """
     Tolerante a variaciones típicas del modelo: markdown alrededor de las
-    etiquetas (**PISTA 1:**), mayúsculas/minúsculas, "REACCIÓN" con tilde,
-    preámbulo antes de la primera etiqueta, orden ligeramente distinto...
-    Solo falla (devuelve None) si de verdad faltan piezas del contenido.
+    etiquetas (**PISTA 1:**), mayúsculas/minúsculas, preámbulo antes de la
+    primera etiqueta... Solo falla (None) si de verdad faltan piezas.
     """
     # Ancladas a principio de línea (tras markdown/espacios) para no confundir
     # una mención de pasada a "el tesoro" en una frase con la etiqueta real.
     inicio = r"(?:^|\n)[ \t]*[*_#]*[ \t]*"
     etiqueta_pista = inicio + r"PISTA\s*(\d+)[.:]?[*_#\s]*"
-    etiqueta_reaccion = inicio + r"REACCI[OÓ]N\s*(\d+)[.:]?[*_#\s]*"
     etiqueta_tesoro = inicio + r"TESORO[.:]?[*_#\s]*"
-    limite_interno = r"PISTA\s*\d+|REACCI[OÓ]N\s*\d+|TESORO"
+    limite_interno = r"PISTA\s*\d+|TESORO"
     limite = rf"(?={inicio}(?:{limite_interno})|\Z)"
 
     def _limpiar(s: str) -> str:
@@ -260,10 +253,6 @@ def _parsear_busqueda_tesoro(texto: str, num_pistas: int) -> dict | None:
     for m in re.finditer(rf"{etiqueta_pista}(.+?){limite}", texto, re.S | re.I):
         pistas_por_numero[int(m.group(1))] = _limpiar(m.group(2))
 
-    reacciones_por_numero: dict[int, str] = {}
-    for m in re.finditer(rf"{etiqueta_reaccion}(.+?){limite}", texto, re.S | re.I):
-        reacciones_por_numero[int(m.group(1))] = _limpiar(m.group(2))
-
     tesoro = ""
     for m in re.finditer(rf"{etiqueta_tesoro}(.+?){limite}", texto, re.S | re.I):
         tesoro = _limpiar(m.group(1))  # se queda con la última ocurrencia, por si acaso
@@ -272,12 +261,7 @@ def _parsear_busqueda_tesoro(texto: str, num_pistas: int) -> dict | None:
     if not tesoro or any(not p for p in pistas):
         return None
 
-    reacciones = [
-        reacciones_por_numero.get(i) or "¡Muy bien! Sigamos, aquí tienes la siguiente pista:"
-        for i in range(1, num_pistas)
-    ]
-
-    return {"pistas": pistas, "reacciones": reacciones, "tesoro": tesoro}
+    return {"pistas": pistas, "tesoro": tesoro}
 
 
 def _busqueda_tesoro_mock(detalles: dict, num_pistas: int) -> dict:
@@ -287,13 +271,41 @@ def _busqueda_tesoro_mock(detalles: dict, num_pistas: int) -> dict:
         f"[MOCK — sin API de IA configurada] Pista {i + 1} para {destinatario}, sobre «{tema}»..."
         for i in range(num_pistas)
     ]
-    reacciones = ["[MOCK] ¡Muy bien! Sigamos..." for _ in range(max(num_pistas - 1, 0))]
     tesoro = (
         f"[MOCK — sin API de IA configurada] ¡Enhorabuena, {destinatario}! Has llegado al final "
         "del tesoro. 🎉 (Configura ANTHROPIC_API_KEY o GEMINI_API_KEY para que esto lo escriba "
         "de verdad la IA.)"
     )
-    return {"pistas": pistas, "reacciones": reacciones, "tesoro": tesoro}
+    return {"pistas": pistas, "tesoro": tesoro}
+
+
+def generar_reaccion_pista(system_prompt: str, detalles: dict) -> str:
+    """
+    Reacción EN VIVO a lo que el destinatario acaba de responder a una
+    pista concreta — para que se sienta escuchado/a de verdad en vez de un
+    "¡genial, siguiente!" repetido siempre igual. No juzga si acertó o no
+    (las pistas no tienen una única solución "correcta"): solo comenta algo
+    concreto de lo que dijo y anima a seguir.
+    """
+    prompt_usuario = (
+        f"Le acabas de dar esta pista a {detalles.get('destinatario')}: «{detalles.get('pista')}». "
+        f"Te ha respondido: «{detalles.get('respuesta')}». Reacciona en una sola frase corta "
+        "(6 a 15 palabras), en tu papel de personaje, mencionando algo concreto de lo que ha "
+        "dicho — no hace falta juzgar si ha acertado o no, el objetivo es que se sienta "
+        "escuchado/a y con ganas de seguir jugando. No repitas ni reveles la siguiente pista, "
+        "solo la reacción."
+    )
+
+    modo = _modo_activo()
+    try:
+        if modo == "anthropic":
+            return _generar_anthropic(system_prompt, prompt_usuario, max_tokens=120)
+        if modo == "gemini":
+            return _generar_gemini(system_prompt, prompt_usuario, max_tokens=120)
+    except Exception as e:
+        print(f"[LLM-ERROR] Fallo generando reacción a pista con {modo}: {e!r}. Usando reacción genérica.")
+
+    return "¡Muy bien! Sigamos, aquí tienes la siguiente pista:"
 
 
 def _generar_mock(system_prompt: str, detalles: dict, instrucciones_formato: str) -> str:

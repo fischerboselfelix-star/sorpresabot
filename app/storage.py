@@ -64,7 +64,6 @@ class EncargoPistas:
     anecdota: str
     comprador_user_id: str
     pistas: list[str]
-    reacciones: list[str]
     tesoro: str
     indice_actual: int = 0
     completado: bool = False
@@ -171,7 +170,6 @@ def crear_encargo_pistas(
     anecdota: str,
     comprador_user_id: str,
     pistas: list[str],
-    reacciones: list[str],
     tesoro: str,
 ) -> str:
     codigo = _generar_codigo()
@@ -184,7 +182,6 @@ def crear_encargo_pistas(
         anecdota=anecdota,
         comprador_user_id=comprador_user_id,
         pistas=pistas,
-        reacciones=reacciones,
         tesoro=tesoro,
     )
     return codigo

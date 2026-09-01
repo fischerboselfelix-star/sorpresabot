@@ -5,19 +5,28 @@ app/chat_en_vivo.py — es él/ella quien inicia el contacto (viene del link de
 la landing de regalo), así que cumple igual con las políticas de WhatsApp
 Business: este número nunca escribe primero a un desconocido.
 
+Las 5 pistas y el tesoro final se generan de un tirón al comprar (ver
+conversation.py), pero la REACCIÓN a cada respuesta del destinatario se
+genera en vivo, una a una (generar_reaccion_pista), para que comente algo
+concreto de lo que la persona ha escrito en vez de repetir siempre el mismo
+"¡genial, siguiente!".
+
 app/main.py llama a manejar_mensaje(remitente, texto) tras comprobar que no
 es un chat en vivo; si esto también devuelve None, sigue el flujo normal
 del comprador.
 """
 
 from . import storage
+from .llm import generar_reaccion_pista
 from .personas import persona_por_id
+
+REACCION_GENERICA = "¡Muy bien! Sigamos:"
 
 
 def manejar_mensaje(remitente: str, texto: str) -> list[str] | None:
     encargo_activo = storage.sesion_pistas_activa_para(remitente)
     if encargo_activo:
-        return _avanzar(remitente, encargo_activo)
+        return _avanzar(remitente, encargo_activo, texto)
 
     encargo = storage.obtener_encargo_pistas_desde_texto(texto)
     if encargo:
@@ -44,18 +53,28 @@ def _iniciar(remitente: str, encargo: storage.EncargoPistas) -> list[str]:
     ]
 
 
-def _avanzar(remitente: str, encargo: storage.EncargoPistas) -> list[str]:
+def _avanzar(remitente: str, encargo: storage.EncargoPistas, texto_usuario: str) -> list[str]:
     total = len(encargo.pistas)
 
     if encargo.completado or total == 0:
         storage.desvincular_sesion_pistas(remitente)
         return ["¡Ya habéis llegado al final de esta búsqueda del tesoro! 🏆✨"]
 
-    reaccion = (
-        encargo.reacciones[encargo.indice_actual]
-        if encargo.indice_actual < len(encargo.reacciones)
-        else "¡Muy bien! Sigamos:"
-    )
+    persona = persona_por_id(encargo.persona_id)
+    pista_respondida = encargo.pistas[encargo.indice_actual]
+
+    if persona:
+        reaccion = generar_reaccion_pista(
+            persona["system_prompt"],
+            {
+                "destinatario": encargo.destinatario,
+                "pista": pista_respondida,
+                "respuesta": texto_usuario,
+            },
+        )
+    else:
+        reaccion = REACCION_GENERICA
+
     encargo.indice_actual += 1
 
     if encargo.indice_actual >= total:

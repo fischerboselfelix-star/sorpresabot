@@ -240,7 +240,6 @@ def _entregar_pistas(user_id: str, sesion: dict) -> list[str]:
         anecdota=sesion.get("anecdota", ""),
         comprador_user_id=user_id,
         pistas=resultado["pistas"],
-        reacciones=resultado["reacciones"],
         tesoro=resultado["tesoro"],
     )
     link = _link_regalo(codigo)
