@@ -70,27 +70,28 @@ def generar_contenido(system_prompt: str, instrucciones_formato: str, detalles: 
     return _generar_mock(system_prompt, detalles, instrucciones_formato)
 
 
-def _generar_anthropic(system_prompt: str, prompt_usuario: str) -> str:
+def _generar_anthropic(system_prompt: str, prompt_usuario: str, max_tokens: int = 500) -> str:
     import anthropic
 
     client = anthropic.Anthropic(api_key=_limpia(os.environ["ANTHROPIC_API_KEY"]))
     modelo = _limpia(os.getenv("ANTHROPIC_MODEL")) or "claude-sonnet-4-5"
     resp = client.messages.create(
         model=modelo,
-        max_tokens=500,
+        max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": prompt_usuario}],
     )
     return "".join(block.text for block in resp.content if block.type == "text").strip()
 
 
-def _generar_gemini(system_prompt: str, prompt_usuario: str) -> str:
+def _generar_gemini(system_prompt: str, prompt_usuario: str, max_tokens: int | None = None) -> str:
     import google.generativeai as genai
 
     genai.configure(api_key=_limpia(os.environ["GEMINI_API_KEY"]))
     modelo_nombre = _limpia(os.getenv("GEMINI_MODEL")) or "gemini-2.0-flash"
     modelo = genai.GenerativeModel(modelo_nombre, system_instruction=system_prompt)
-    resp = modelo.generate_content(prompt_usuario)
+    config = {"max_output_tokens": max_tokens} if max_tokens else None
+    resp = modelo.generate_content(prompt_usuario, generation_config=config)
     return resp.text.strip()
 
 
@@ -211,13 +212,16 @@ def generar_busqueda_tesoro(system_prompt: str, detalles: dict, num_pistas: int 
         + "\nTESORO: <texto>"
     )
 
+    # 5 pistas + 4 reacciones + tesoro es bastante más largo que una entrega
+    # normal — con el límite por defecto (500) la respuesta se corta a mitad
+    # y el parser no encuentra el tesoro. Le damos mucho más margen.
     modo = _modo_activo()
     texto = None
     try:
         if modo == "anthropic":
-            texto = _generar_anthropic(system_prompt, prompt_usuario)
+            texto = _generar_anthropic(system_prompt, prompt_usuario, max_tokens=2000)
         elif modo == "gemini":
-            texto = _generar_gemini(system_prompt, prompt_usuario)
+            texto = _generar_gemini(system_prompt, prompt_usuario, max_tokens=2000)
     except Exception as e:
         print(f"[LLM-ERROR] Fallo generando búsqueda del tesoro con {modo}: {e!r}. Usando modo mock.")
 
