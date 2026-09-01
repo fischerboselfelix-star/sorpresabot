@@ -17,11 +17,10 @@ webhook real de WhatsApp (app/main.py) como el simulador local
 misma lógica que correría en producción.
 """
 
-import os
 from datetime import datetime, timedelta
 
-from . import storage
-from .llm import generar_busqueda_tesoro, generar_contenido
+from . import entregas, pagos, storage
+from .llm import generar_contenido
 from .personas import PERSONAS, FORMATOS, OCASIONES, catalogo_personas_texto, catalogo_formatos_texto, catalogo_ocasiones_texto
 
 COMANDOS_REINICIO = {"reiniciar", "cancelar", "empezar", "hola"}
@@ -120,7 +119,7 @@ def handle_message(user_id: str, texto: str) -> list[str]:
             sesion["contenido"] = contenido
             return [contenido, "¿Mejor así? 'sí' para confirmar o 'no' para otra versión."]
         if texto.lower() in ("si", "sí", "vale", "ok"):
-            return _entregar(user_id, sesion)
+            return _solicitar_pago_simple(user_id, sesion)
         return ["Responde 'sí' para confirmar o 'no' para otra versión."]
 
     # estado desconocido -> reiniciar de forma segura
@@ -163,102 +162,99 @@ def _parsear_fecha(texto: str):
     return None
 
 
-def _entregar(user_id: str, sesion: dict) -> list[str]:
-    contenido = sesion["contenido"]
-    destinatario = sesion["destinatario"]
-    fecha_entrega = sesion.get("fecha_entrega")
-
-    mensajes: list[str] = []
-
-    if fecha_entrega is None:
-        mensajes.append(
-            "¡Listo! 🎉 Copia y reenvía tú mismo/a este mensaje a "
-            f"{destinatario} desde tu WhatsApp:"
-        )
-        mensajes.append(contenido)
-    else:
-        storage.programar_entrega(user_id, contenido, destinatario, fecha_entrega)
-        mensajes.append(
-            f"Guardado ✅ Te lo recordaré aquí mismo el {fecha_entrega.strftime('%d/%m/%Y a las %H:%M')} "
-            f"para que se lo reenvíes a {destinatario} en el momento justo."
-        )
-
-    mensajes.append("Si quieres crear otro, escribe 'hola' cuando quieras 🙂")
+def _solicitar_pago_simple(user_id: str, sesion: dict) -> list[str]:
+    """
+    El contenido ya se generó como vista previa (ESPERANDO_FECHA), pero NO
+    se entrega aquí: se crea un pedido pendiente y se cobra antes. Solo
+    cuando el pago se confirma (o al instante, en modo simulado sin Stripe
+    configurado) se ejecuta la entrega real, en app/entregas.py.
+    """
+    pedido = storage.crear_pedido_pendiente(
+        user_id=user_id,
+        tipo="simple",
+        precio=_precio_pedido(sesion),
+        destinatario=sesion["destinatario"],
+        ocasion=sesion["ocasion"],
+        anecdota=sesion.get("anecdota", ""),
+        contenido=sesion["contenido"],
+        fecha_entrega=sesion.get("fecha_entrega"),
+    )
     storage.reset_session(user_id)
-    return mensajes
+    return _iniciar_cobro(pedido, descripcion=f"Mensaje personalizado para {sesion['destinatario']}")
 
 
 def _entregar_chat_en_vivo(user_id: str, sesion: dict) -> list[str]:
+    """
+    A diferencia del resto, aquí NO se crea el encargo (ni el link de
+    regalo) hasta que el pago está confirmado: eso ocurre en
+    app/entregas.py, para no repartir links de una experiencia que nadie
+    ha pagado todavía.
+    """
     persona = _persona_actual(sesion)
-    formato = FORMATOS[sesion["formato_id"]]
-    mensajes_incluidos = formato.get("mensajes_incluidos", 15)
-
-    codigo = storage.crear_encargo_chat_vivo(
-        persona_id=persona["id"],
+    pedido = storage.crear_pedido_pendiente(
+        user_id=user_id,
+        tipo="chat_en_vivo",
+        precio=_precio_pedido(sesion),
         destinatario=sesion["destinatario"],
         ocasion=sesion["ocasion"],
         anecdota=sesion.get("anecdota", ""),
-        comprador_user_id=user_id,
-        mensajes_incluidos=mensajes_incluidos,
+        persona_id=persona["id"],
+        formato_id=sesion["formato_id"],
     )
-    link = _link_regalo(codigo)
-    precio = persona["precio_base"] + formato["precio_extra"]
-
-    mensajes = [
-        f"¡Listo! 🎉 Precio de esta experiencia: {precio:.2f} €.",
-        f"Mándale este link a {sesion['destinatario']} (por SMS, WhatsApp, donde prefieras):\n{link}",
-        f"Cuando lo abra y le escriba a {persona['nombre']}, tendrá una conversación en vivo "
-        f"de hasta {mensajes_incluidos} mensajes con él/ella — no es un texto para reenviar, "
-        "es él/ella hablando de verdad con el personaje.",
-        "Si quieres crear otro, escribe 'hola' cuando quieras 🙂",
-    ]
     storage.reset_session(user_id)
-    return mensajes
+    return _iniciar_cobro(
+        pedido, descripcion=f"Conversación en vivo con {persona['nombre']} para {sesion['destinatario']}"
+    )
 
 
 def _entregar_pistas(user_id: str, sesion: dict) -> list[str]:
+    """
+    Igual que en el chat en vivo: las pistas y el tesoro se generan con IA
+    solo tras el pago (app/entregas.py), no aquí — así no se gasta en
+    generación si el comprador no llega a pagar.
+    """
     persona = _persona_actual(sesion)
-    formato = FORMATOS[sesion["formato_id"]]
-    num_pistas = formato.get("num_pistas", 5)
-
-    resultado = generar_busqueda_tesoro(
-        persona["system_prompt"],
-        {
-            "destinatario": sesion["destinatario"],
-            "ocasion": sesion["ocasion"],
-            "tema": sesion.get("anecdota", ""),
-            "anecdota": sesion.get("anecdota", ""),
-        },
-        num_pistas=num_pistas,
-    )
-
-    codigo = storage.crear_encargo_pistas(
-        persona_id=persona["id"],
+    pedido = storage.crear_pedido_pendiente(
+        user_id=user_id,
+        tipo="pistas",
+        precio=_precio_pedido(sesion),
         destinatario=sesion["destinatario"],
         ocasion=sesion["ocasion"],
-        tema=sesion.get("anecdota", ""),
         anecdota=sesion.get("anecdota", ""),
-        comprador_user_id=user_id,
-        pistas=resultado["pistas"],
-        tesoro=resultado["tesoro"],
+        persona_id=persona["id"],
+        formato_id=sesion["formato_id"],
     )
-    link = _link_regalo(codigo)
-    precio = persona["precio_base"] + formato["precio_extra"]
-
-    mensajes = [
-        f"¡Listo! 🎉 Precio de esta experiencia: {precio:.2f} €.",
-        f"Mándale este link a {sesion['destinatario']} (por SMS, WhatsApp, donde prefieras):\n{link}",
-        f"Cuando lo abra y le escriba a {persona['nombre']}, empezará una búsqueda del tesoro de "
-        f"{num_pistas} pistas encadenadas, con una sorpresa final al terminar.",
-        "Si quieres crear otro, escribe 'hola' cuando quieras 🙂",
-    ]
     storage.reset_session(user_id)
-    return mensajes
+    return _iniciar_cobro(
+        pedido, descripcion=f"Búsqueda del tesoro de {persona['nombre']} para {sesion['destinatario']}"
+    )
 
 
-def _link_regalo(codigo: str) -> str:
-    base = os.getenv("PUBLIC_BASE_URL")
-    if not base:
-        dominio = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-        base = f"https://{dominio}" if dominio else "http://localhost:8000"
-    return f"{base.rstrip('/')}/r/{codigo}"
+def _iniciar_cobro(pedido: "storage.PedidoPendiente", descripcion: str) -> list[str]:
+    try:
+        url_pago = pagos.iniciar_pago(pedido.pedido_id, descripcion, pedido.precio, pedido.user_id)
+    except Exception as e:
+        # Fallo real de Stripe (clave mal copiada, cuenta con restricciones,
+        # corte de red...): NO se entrega el pedido gratis, se avisa y ya
+        # está — el pedido queda en PEDIDOS_PENDIENTES por si se quiere
+        # reintentar el cobro manualmente.
+        print(f"[STRIPE-ERROR] No se pudo iniciar el cobro del pedido {pedido.pedido_id}: {e!r}")
+        return [
+            "Se ha guardado el pedido pero ha habido un problema preparando el cobro 😕 "
+            "Escribe 'hola' para intentarlo de nuevo en un momento."
+        ]
+
+    if url_pago:
+        return [
+            f"¡Casi listo! 🎉 Precio: {pedido.precio:.2f} €.",
+            f"Para confirmarlo, paga aquí de forma segura:\n{url_pago}",
+            "En cuanto se confirme el pago te mando aquí mismo lo que necesites para entregarlo "
+            "— normalmente tarda solo unos segundos.",
+        ]
+
+    # Modo simulado (sin STRIPE_SECRET_KEY configurada): se entrega al
+    # instante, igual que hacía el prototipo antes de tener cobro real —
+    # así las pruebas locales (test_scenario.py) y el desarrollo siguen
+    # funcionando sin necesitar una cuenta de Stripe.
+    storage.marcar_pagado(pedido.pedido_id)
+    return entregas.completar_pedido(pedido)

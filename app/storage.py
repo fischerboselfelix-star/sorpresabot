@@ -10,6 +10,7 @@ prototipo se pueda leer y probar sin montar infraestructura.
 import random
 import re
 import string
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -27,6 +28,13 @@ SESIONES_CHAT_VIVO: dict[str, str] = {}  # teléfono destinatario -> código
 # con una secuencia de pistas pre-generada que se va desvelando.
 ENCARGOS_PISTAS: dict[str, "EncargoPistas"] = {}
 SESIONES_PISTAS: dict[str, str] = {}  # teléfono destinatario -> código
+
+# --- Pedidos pendientes de pago: se crea uno justo cuando el comprador
+# confirma qué quiere, ANTES de generar/entregar nada. Solo cuando el
+# webhook de Stripe confirma el pago (o, en modo simulado sin Stripe
+# configurado, al instante — ver app/pagos.py) se genera y entrega el
+# contenido de verdad, vía app/entregas.py.
+PEDIDOS_PENDIENTES: dict[str, "PedidoPendiente"] = {}
 
 _CODIGO_RE = re.compile(r"[A-Z0-9]{6}")
 
@@ -67,6 +75,23 @@ class EncargoPistas:
     tesoro: str
     indice_actual: int = 0
     completado: bool = False
+    creado_en: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class PedidoPendiente:
+    pedido_id: str
+    user_id: str
+    tipo: str  # "simple" | "chat_en_vivo" | "pistas"
+    precio: float
+    destinatario: str
+    ocasion: str
+    anecdota: str
+    persona_id: str = ""
+    formato_id: str = ""
+    contenido: str = ""  # solo para "simple": ya generado en la vista previa
+    fecha_entrega: Optional[datetime] = None
+    pagado: bool = False
     creado_en: datetime = field(default_factory=datetime.now)
 
 
@@ -213,3 +238,47 @@ def vincular_sesion_pistas(telefono: str, codigo: str) -> None:
 
 def desvincular_sesion_pistas(telefono: str) -> None:
     SESIONES_PISTAS.pop(telefono, None)
+
+
+def crear_pedido_pendiente(
+    user_id: str,
+    tipo: str,
+    precio: float,
+    destinatario: str,
+    ocasion: str,
+    anecdota: str,
+    persona_id: str = "",
+    formato_id: str = "",
+    contenido: str = "",
+    fecha_entrega: Optional[datetime] = None,
+) -> PedidoPendiente:
+    pedido_id = uuid.uuid4().hex[:12]
+    pedido = PedidoPendiente(
+        pedido_id=pedido_id,
+        user_id=user_id,
+        tipo=tipo,
+        precio=precio,
+        destinatario=destinatario,
+        ocasion=ocasion,
+        anecdota=anecdota,
+        persona_id=persona_id,
+        formato_id=formato_id,
+        contenido=contenido,
+        fecha_entrega=fecha_entrega,
+    )
+    PEDIDOS_PENDIENTES[pedido_id] = pedido
+    return pedido
+
+
+def obtener_pedido(pedido_id: str) -> Optional[PedidoPendiente]:
+    return PEDIDOS_PENDIENTES.get(pedido_id)
+
+
+def marcar_pagado(pedido_id: str) -> Optional[PedidoPendiente]:
+    """Idempotente a propósito: Stripe puede reenviar el mismo evento de
+    webhook más de una vez, y no queremos entregar el pedido dos veces."""
+    pedido = PEDIDOS_PENDIENTES.get(pedido_id)
+    if pedido and not pedido.pagado:
+        pedido.pagado = True
+        return pedido
+    return None

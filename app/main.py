@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
-from . import chat_en_vivo, pistas, storage
+from . import chat_en_vivo, entregas, pagos, pistas, storage
 from .conversation import handle_message
 from .personas import persona_por_id
 from .whatsapp import send_text
@@ -99,6 +99,66 @@ async def recibir_mensaje(request: Request):
 @app.get("/")
 def salud():
     return {"status": "SorpresaBot activo"}
+
+
+@app.post("/webhook/stripe")
+async def webhook_stripe(request: Request):
+    """
+    Confirmación de pago real. Aquí, y solo aquí (o en el equivalente en
+    modo simulado dentro de conversation.py cuando no hay Stripe
+    configurado), se dispara la entrega de contenido de un pedido.
+    """
+    payload = await request.body()
+    firma = request.headers.get("stripe-signature", "")
+
+    try:
+        evento = pagos.verificar_firma_webhook(payload, firma)
+    except Exception as e:
+        print(f"[STRIPE-ERROR] Webhook con firma inválida o payload mal formado: {e!r}")
+        return Response(status_code=400)
+
+    tipo_evento = evento["type"]
+    if tipo_evento == "checkout.session.completed":
+        objeto = evento["data"]["object"]
+        metadata = objeto.get("metadata") or {}
+        pedido_id = metadata.get("pedido_id")
+        pedido = storage.marcar_pagado(pedido_id) if pedido_id else None
+        if pedido:
+            for mensaje in entregas.completar_pedido(pedido):
+                send_text(pedido.user_id, mensaje)
+        elif pedido_id:
+            print(f"[STRIPE] Evento de pago para un pedido ya entregado o desconocido: {pedido_id}")
+
+    return {"status": "ok"}
+
+
+@app.get("/pago-ok", response_class=HTMLResponse)
+def pago_ok(pedido: str = ""):
+    return HTMLResponse(_html_estado_pago(
+        "¡Pago recibido! 🎉",
+        "Ya puedes volver a WhatsApp: en unos segundos te llega ahí mismo lo que necesitas "
+        "para completar el regalo.",
+    ))
+
+
+@app.get("/pago-cancelado", response_class=HTMLResponse)
+def pago_cancelado(pedido: str = ""):
+    return HTMLResponse(_html_estado_pago(
+        "Pago no completado 🙈",
+        "No pasa nada — vuelve a WhatsApp y escribe 'hola' cuando quieras intentarlo de nuevo.",
+    ))
+
+
+def _html_estado_pago(titulo: str, cuerpo: str) -> str:
+    return f"""<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SorpresaBot</title></head>
+<body style="font-family:-apple-system,sans-serif;background:#1a1a2e;color:#fff;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px;">
+<div><h1 style="font-size:1.6rem;">{titulo}</h1>
+<p style="opacity:.8;max-width:360px;">{cuerpo}</p></div>
+</body></html>"""
 
 
 @app.get("/r/{codigo}", response_class=HTMLResponse)
