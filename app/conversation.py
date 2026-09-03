@@ -38,6 +38,7 @@ def handle_message(user_id: str, texto: str) -> list[str]:
 
     if estado == "INICIO":
         sesion["estado"] = "ESPERANDO_PERSONA"
+        storage.registrar_evento("hola", user_id=user_id)
         return [
             "¡Hola! 👋 Soy el asistente de SorpresaBot. Te ayudo a crear un mensaje, "
             "poema o cuento personalizado para regalarle a alguien.",

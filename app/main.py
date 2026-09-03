@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
-from . import chat_en_vivo, entregas, pagos, pistas, storage
+from . import chat_en_vivo, entregas, metricas, pagos, paginas, pistas, storage
 from .conversation import handle_message
 from .personas import persona_por_id
 from .whatsapp import send_text
@@ -96,9 +96,41 @@ async def recibir_mensaje(request: Request):
     return {"status": "ok"}
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
+def landing():
+    """Landing pública: la página que se promociona en redes/anuncios, con
+    el botón que abre WhatsApp directamente con 'hola' precargado."""
+    numero = _limpia(os.getenv("WHATSAPP_NUMERO_PUBLICO"))
+    wa_link = f"https://wa.me/{numero}?text=hola" if numero else None
+    return HTMLResponse(paginas.html_landing(wa_link))
+
+
+@app.get("/status")
 def salud():
     return {"status": "SorpresaBot activo"}
+
+
+@app.get("/metricas", response_class=HTMLResponse)
+def ver_metricas(clave: str = ""):
+    """
+    Panel simple del embudo hola -> pedido creado -> pedido pagado.
+    Protegido con una clave compartida (METRICAS_CLAVE) pasada como
+    ?clave=... en la URL — no es una autenticación seria, pero basta para
+    que la URL no sea públicamente accesible por cualquiera que la adivine.
+    """
+    clave_esperada = _limpia(os.getenv("METRICAS_CLAVE"))
+    if not clave_esperada:
+        return HTMLResponse(
+            "<p style='font-family:sans-serif;padding:24px;'>Configura la variable de entorno "
+            "METRICAS_CLAVE para activar este panel.</p>",
+            status_code=503,
+        )
+    if clave != clave_esperada:
+        return HTMLResponse(
+            "<p style='font-family:sans-serif;padding:24px;'>No autorizado.</p>", status_code=401
+        )
+    resumen = metricas.resumen_embudo(storage.EVENTOS)
+    return HTMLResponse(paginas.html_metricas(resumen))
 
 
 @app.post("/webhook/stripe")

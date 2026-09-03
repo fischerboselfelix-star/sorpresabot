@@ -36,6 +36,12 @@ SESIONES_PISTAS: dict[str, str] = {}  # teléfono destinatario -> código
 # contenido de verdad, vía app/entregas.py.
 PEDIDOS_PENDIENTES: dict[str, "PedidoPendiente"] = {}
 
+# --- Métricas: registro simple de eventos del embudo (hola -> pedido creado
+# -> pedido pagado), para poder medir conversión y saber si merece la pena
+# invertir en promoción. En memoria, como el resto del prototipo: se pierde
+# al reiniciar el servidor — ver GET /metricas en app/main.py.
+EVENTOS: list["Evento"] = []
+
 _CODIGO_RE = re.compile(r"[A-Z0-9]{6}")
 
 
@@ -79,6 +85,15 @@ class EncargoPistas:
 
 
 @dataclass
+class Evento:
+    tipo: str  # "hola" | "pedido_creado" | "pedido_pagado"
+    user_id: str
+    en: datetime = field(default_factory=datetime.now)
+    tipo_pedido: str = ""  # "simple" | "chat_en_vivo" | "pistas" (solo pedidos)
+    precio: float = 0.0  # solo pedidos
+
+
+@dataclass
 class PedidoPendiente:
     pedido_id: str
     user_id: str
@@ -93,6 +108,10 @@ class PedidoPendiente:
     fecha_entrega: Optional[datetime] = None
     pagado: bool = False
     creado_en: datetime = field(default_factory=datetime.now)
+
+
+def registrar_evento(tipo: str, user_id: str, tipo_pedido: str = "", precio: float = 0.0) -> None:
+    EVENTOS.append(Evento(tipo=tipo, user_id=user_id, tipo_pedido=tipo_pedido, precio=precio))
 
 
 def get_session(user_id: str) -> dict:
@@ -267,6 +286,7 @@ def crear_pedido_pendiente(
         fecha_entrega=fecha_entrega,
     )
     PEDIDOS_PENDIENTES[pedido_id] = pedido
+    registrar_evento("pedido_creado", user_id=user_id, tipo_pedido=tipo, precio=precio)
     return pedido
 
 
@@ -280,5 +300,6 @@ def marcar_pagado(pedido_id: str) -> Optional[PedidoPendiente]:
     pedido = PEDIDOS_PENDIENTES.get(pedido_id)
     if pedido and not pedido.pagado:
         pedido.pagado = True
+        registrar_evento("pedido_pagado", user_id=pedido.user_id, tipo_pedido=pedido.tipo, precio=pedido.precio)
         return pedido
     return None
