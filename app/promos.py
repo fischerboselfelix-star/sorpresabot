@@ -19,8 +19,21 @@ PROMOS: dict[str, dict] = {
 }
 
 
+def _normalizar(texto: str) -> str:
+    """
+    La letra "O" y el número "0" son casi indistinguibles en muchos teclados
+    y fuentes (p.ej. "REGALO10" vs "REGAL010"), así que se tratan como el
+    mismo carácter al comparar códigos — mejor reconocer de más que perder
+    un descuento por una errata invisible.
+    """
+    return (texto or "").strip().upper().replace("O", "0")
+
+
+_PROMOS_NORMALIZADAS: dict[str, dict] = {_normalizar(k): v for k, v in PROMOS.items()}
+
+
 def obtener_promo(texto: str) -> dict | None:
-    return PROMOS.get((texto or "").strip().upper())
+    return _PROMOS_NORMALIZADAS.get(_normalizar(texto))
 
 
 def aplicar_descuento(precio: float, promo: dict | None) -> float:
