@@ -140,6 +140,22 @@ def html_metricas(resumen: dict) -> str:
         _tarjeta("Conversión hola → pago", f"{resumen['tasa_hola_a_pago']:.0f} %"),
     ])
 
+    origen_directo = resumen["por_origen"]["directo"]
+    origen_viral = resumen["por_origen"]["viral"]
+
+    def _fila_origen(etiqueta: str, datos: dict) -> str:
+        return f"""<tr>
+            <td style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.1);">{etiqueta}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.1);text-align:right;">{datos['holas']}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.1);text-align:right;">{datos['pedidos_creados']}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.1);text-align:right;">{datos['pedidos_pagados']}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.1);text-align:right;">{datos['ingresos']:.2f} €</td>
+        </tr>"""
+
+    filas_origen = _fila_origen("Directo (link normal)", origen_directo) + _fila_origen(
+        "Bucle viral (código REGALO10)", origen_viral
+    )
+
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -153,6 +169,18 @@ def html_metricas(resumen: dict) -> str:
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:24px 0 36px;">
   {tarjetas}
 </div>
+
+<h2 style="font-size:1.05rem;margin-bottom:10px;">Directo vs. bucle viral</h2>
+<table style="width:100%;border-collapse:collapse;margin-bottom:36px;">
+<thead><tr>
+  <th style="text-align:left;padding:8px 12px;opacity:.6;font-size:.8rem;">Origen</th>
+  <th style="text-align:right;padding:8px 12px;opacity:.6;font-size:.8rem;">Holas</th>
+  <th style="text-align:right;padding:8px 12px;opacity:.6;font-size:.8rem;">Pedidos creados</th>
+  <th style="text-align:right;padding:8px 12px;opacity:.6;font-size:.8rem;">Pagados</th>
+  <th style="text-align:right;padding:8px 12px;opacity:.6;font-size:.8rem;">Ingresos</th>
+</tr></thead>
+<tbody>{filas_origen}</tbody>
+</table>
 
 <h2 style="font-size:1.05rem;margin-bottom:10px;">Ingresos por tipo de producto</h2>
 <table style="width:100%;border-collapse:collapse;margin-bottom:36px;">

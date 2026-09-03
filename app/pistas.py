@@ -16,7 +16,7 @@ es un chat en vivo; si esto también devuelve None, sigue el flujo normal
 del comprador.
 """
 
-from . import storage
+from . import promos, storage
 from .llm import generar_reaccion_pista
 from .personas import persona_por_id
 
@@ -80,7 +80,12 @@ def _avanzar(remitente: str, encargo: storage.EncargoPistas, texto_usuario: str)
     if encargo.indice_actual >= total:
         encargo.completado = True
         storage.desvincular_sesion_pistas(remitente)
-        return [reaccion, "🏆 ¡Has llegado al final! Aquí tienes tu tesoro:", encargo.tesoro]
+        return [
+            reaccion,
+            "🏆 ¡Has llegado al final! Aquí tienes tu tesoro:",
+            encargo.tesoro,
+            promos.mensaje_invitacion_viral(),
+        ]
 
     return [
         reaccion,

@@ -91,6 +91,7 @@ class Evento:
     en: datetime = field(default_factory=datetime.now)
     tipo_pedido: str = ""  # "simple" | "chat_en_vivo" | "pistas" (solo pedidos)
     precio: float = 0.0  # solo pedidos
+    origen: str = "directo"  # "directo" | "viral" (de qué venía el 'hola' inicial)
 
 
 @dataclass
@@ -107,11 +108,14 @@ class PedidoPendiente:
     contenido: str = ""  # solo para "simple": ya generado en la vista previa
     fecha_entrega: Optional[datetime] = None
     pagado: bool = False
+    origen: str = "directo"  # "directo" | "viral" — para medir el bucle viral en /metricas
     creado_en: datetime = field(default_factory=datetime.now)
 
 
-def registrar_evento(tipo: str, user_id: str, tipo_pedido: str = "", precio: float = 0.0) -> None:
-    EVENTOS.append(Evento(tipo=tipo, user_id=user_id, tipo_pedido=tipo_pedido, precio=precio))
+def registrar_evento(
+    tipo: str, user_id: str, tipo_pedido: str = "", precio: float = 0.0, origen: str = "directo"
+) -> None:
+    EVENTOS.append(Evento(tipo=tipo, user_id=user_id, tipo_pedido=tipo_pedido, precio=precio, origen=origen))
 
 
 def get_session(user_id: str) -> dict:
@@ -270,6 +274,7 @@ def crear_pedido_pendiente(
     formato_id: str = "",
     contenido: str = "",
     fecha_entrega: Optional[datetime] = None,
+    origen: str = "directo",
 ) -> PedidoPendiente:
     pedido_id = uuid.uuid4().hex[:12]
     pedido = PedidoPendiente(
@@ -284,9 +289,10 @@ def crear_pedido_pendiente(
         formato_id=formato_id,
         contenido=contenido,
         fecha_entrega=fecha_entrega,
+        origen=origen,
     )
     PEDIDOS_PENDIENTES[pedido_id] = pedido
-    registrar_evento("pedido_creado", user_id=user_id, tipo_pedido=tipo, precio=precio)
+    registrar_evento("pedido_creado", user_id=user_id, tipo_pedido=tipo, precio=precio, origen=origen)
     return pedido
 
 
@@ -300,6 +306,12 @@ def marcar_pagado(pedido_id: str) -> Optional[PedidoPendiente]:
     pedido = PEDIDOS_PENDIENTES.get(pedido_id)
     if pedido and not pedido.pagado:
         pedido.pagado = True
-        registrar_evento("pedido_pagado", user_id=pedido.user_id, tipo_pedido=pedido.tipo, precio=pedido.precio)
+        registrar_evento(
+            "pedido_pagado",
+            user_id=pedido.user_id,
+            tipo_pedido=pedido.tipo,
+            precio=pedido.precio,
+            origen=pedido.origen,
+        )
         return pedido
     return None

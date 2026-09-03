@@ -33,6 +33,17 @@ def resumen_embudo(eventos: list["storage.Evento"]) -> dict:
     def _tasa(numerador: int, denominador: int) -> float:
         return (numerador / denominador * 100) if denominador else 0.0
 
+    def _segmento(origen: str) -> dict:
+        h = [e for e in holas if e.origen == origen]
+        c = [e for e in creados if e.origen == origen]
+        p = [e for e in pagados if e.origen == origen]
+        return {
+            "holas": len(h),
+            "pedidos_creados": len(c),
+            "pedidos_pagados": len(p),
+            "ingresos": sum(e.precio for e in p),
+        }
+
     return {
         "holas": len(holas),
         "usuarios_unicos_hola": len(usuarios_hola),
@@ -44,5 +55,9 @@ def resumen_embudo(eventos: list["storage.Evento"]) -> dict:
         "tasa_pedido_a_pago": _tasa(len(pagados), len(creados)),
         "tasa_hola_a_pago": _tasa(len(pagados), len(holas)),
         "por_tipo": dict(por_tipo),
+        "por_origen": {
+            "directo": _segmento("directo"),
+            "viral": _segmento("viral"),
+        },
         "ultimos_eventos": sorted(eventos, key=lambda e: e.en, reverse=True)[:30],
     }

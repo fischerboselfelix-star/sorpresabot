@@ -19,7 +19,7 @@ misma lógica que correría en producción.
 
 from datetime import datetime, timedelta
 
-from . import entregas, pagos, storage
+from . import entregas, pagos, promos, storage
 from .llm import generar_contenido
 from .personas import PERSONAS, FORMATOS, OCASIONES, catalogo_personas_texto, catalogo_formatos_texto, catalogo_ocasiones_texto
 
@@ -37,13 +37,23 @@ def handle_message(user_id: str, texto: str) -> list[str]:
     estado = sesion["estado"]
 
     if estado == "INICIO":
+        promo = promos.obtener_promo(texto)
         sesion["estado"] = "ESPERANDO_PERSONA"
-        storage.registrar_evento("hola", user_id=user_id)
-        return [
+        if promo:
+            sesion["promo"] = promo
+        storage.registrar_evento("hola", user_id=user_id, origen=(promo["origen"] if promo else "directo"))
+
+        mensajes = []
+        if promo:
+            mensajes.append(
+                f"🎉 ¡Código aplicado! Tienes un {promo['descuento_pct']}% de descuento en tu pedido."
+            )
+        mensajes += [
             "¡Hola! 👋 Soy el asistente de SorpresaBot. Te ayudo a crear un mensaje, "
             "poema o cuento personalizado para regalarle a alguien.",
             catalogo_personas_texto(),
         ]
+        return mensajes
 
     if estado == "ESPERANDO_PERSONA":
         persona = PERSONAS.get(texto)
@@ -149,7 +159,13 @@ def _generar(sesion: dict) -> str:
 def _precio_pedido(sesion: dict) -> float:
     persona = _persona_actual(sesion)
     formato = FORMATOS[sesion["formato_id"]]
-    return persona["precio_base"] + formato["precio_extra"]
+    precio = persona["precio_base"] + formato["precio_extra"]
+    return promos.aplicar_descuento(precio, sesion.get("promo"))
+
+
+def _origen_pedido(sesion: dict) -> str:
+    promo = sesion.get("promo")
+    return promo["origen"] if promo else "directo"
 
 
 def _parsear_fecha(texto: str):
@@ -179,6 +195,7 @@ def _solicitar_pago_simple(user_id: str, sesion: dict) -> list[str]:
         anecdota=sesion.get("anecdota", ""),
         contenido=sesion["contenido"],
         fecha_entrega=sesion.get("fecha_entrega"),
+        origen=_origen_pedido(sesion),
     )
     storage.reset_session(user_id)
     return _iniciar_cobro(pedido, descripcion=f"Mensaje personalizado para {sesion['destinatario']}")
@@ -201,6 +218,7 @@ def _entregar_chat_en_vivo(user_id: str, sesion: dict) -> list[str]:
         anecdota=sesion.get("anecdota", ""),
         persona_id=persona["id"],
         formato_id=sesion["formato_id"],
+        origen=_origen_pedido(sesion),
     )
     storage.reset_session(user_id)
     return _iniciar_cobro(
@@ -224,6 +242,7 @@ def _entregar_pistas(user_id: str, sesion: dict) -> list[str]:
         anecdota=sesion.get("anecdota", ""),
         persona_id=persona["id"],
         formato_id=sesion["formato_id"],
+        origen=_origen_pedido(sesion),
     )
     storage.reset_session(user_id)
     return _iniciar_cobro(

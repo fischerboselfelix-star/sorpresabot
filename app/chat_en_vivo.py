@@ -14,7 +14,7 @@ conversation.handle_message; si devuelve None, es que ese mensaje no es
 parte de un chat en vivo y sigue el flujo normal del comprador.
 """
 
-from . import storage
+from . import promos, storage
 from .llm import generar_respuesta_chat_vivo, generar_saludo_chat_vivo
 from .personas import persona_por_id
 
@@ -59,7 +59,7 @@ def _continuar(remitente: str, encargo: storage.EncargoChatVivo, texto: str) -> 
         nombre = persona["nombre"] if persona else "tu personaje"
         return [
             f"{nombre} se ha tenido que ir por hoy ✨ ¡Ojalá te haya gustado la sorpresa!",
-            "(Si quieres regalar tú también una conversación así, escríbenos a este mismo número.)",
+            promos.mensaje_invitacion_viral(),
         ]
 
     historial_previo = list(encargo.historial)
@@ -74,5 +74,6 @@ def _continuar(remitente: str, encargo: storage.EncargoChatVivo, texto: str) -> 
         mensajes.append(
             "(Se han acabado los mensajes de esta sorpresa — ¡espero que os haya encantado! 💌)"
         )
+        mensajes.append(promos.mensaje_invitacion_viral())
         storage.desvincular_sesion(remitente)
     return mensajes
